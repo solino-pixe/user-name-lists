@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>Zufalls-Namensgenerator (Supabase Login)</title>
+<style>
+body { font-family: Arial; text-align: center; margin: 30px; background: #f0f4f7; }
+h2,h3 { color: #333; }
+input, button, textarea, select { padding: 8px; margin: 5px; font-size: 14px; border-radius:4px; border:1px solid #ccc; }
+textarea { width: 300px; height: 150px; }
+button { background: #007BFF; color: #fff; border:none; cursor:pointer; }
+button:hover { background: #0056b3; }
+#winner { font-size: 22px; font-weight: bold; color: green; margin-top: 15px; }
+#chance { font-size: 18px; color: #555; margin-top: 5px; }
+#msg { font-weight: bold; }
+table { margin: auto; border-collapse: collapse; margin-top:15px; width:60%; }
+th, td { border: 1px solid #aaa; padding: 8px; text-align:center; }
+th { background: #007BFF; color:white; }
+tr:nth-child(even){ background:#f2f2f2; }
+</style>
+
+<!-- Supabase Bibliothek -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+
+<h2>🔐 Login / Registrierung</h2>
+
+<div id="loginDiv">
+<input id="user" placeholder="E-Mail"><br>
+<input id="pass" type="password" placeholder="Passwort"><br>
+<button onclick="register()">Registrieren</button>
+<button onclick="login()">Anmelden</button>
+<p id="msg"></p>
+</div>
+
+<div id="bereich" style="display:none">
+
+<h2>🎲 Zufalls-Namensgenerator</h2>
+
+<h3>📂 Namenslisten</h3>
+<input id="listName" placeholder="Neue Liste z.B. Gewinnspiel">
+<button onclick="createList()">➕ Erstellen</button><br>
+
+<select id="listSelect" onchange="loadNames()"></select>
+
+<br><br>
+
+<textarea id="namenInput" placeholder="Einen Namen pro Zeile"></textarea><br>
+
+<button onclick="saveNames()">💾 Speichern</button>
+<button onclick="drawName()">🎯 Ziehen</button>
+<button onclick="logout()">🚪 Abmelden</button>
+
+<h3 id="winner"></h3>
+<p id="chance"></p>
+
+<table>
+<tr><th>Name</th><th>Gezogen</th><th>Letzter Zug</th></tr>
+<tbody id="userStats"></tbody>
+</table>
+
+</div>
+
+<script>
+// 🔹 Supabase Setup – direkt oben im Script
+const supabaseUrl = "https://DEIN-PROJEKT.supabase.co"; // hier Supabase Project URL einfügen
+const supabaseKey = "sb_publishable_qFdL8nQXHZUGEG1491ecsg_2LnUS_da"; // hier deinen Publishable Key einfügen
+const supabase = supabaseJs.createClient(supabaseUrl, supabaseKey);
+
+// ---------- LocalStorage Setup ----------
+function getAllStats(){ return JSON.parse(localStorage.getItem("userStats")||"{}"); }
+function saveAllStats(s){ localStorage.setItem("userStats", JSON.stringify(s)); }
+
+// ---------- Registrierung ----------
+async function register(){
+    const email = user.value.trim();
+    const password = pass.value.trim();
+    if(password.length < 6){ msg.style.color="red"; msg.textContent="Passwort min. 6 Zeichen"; return; }
+
+    const { error } = await supabase.auth.signUp({ email, password });
+
+    if(error){ msg.style.color="red"; msg.textContent = error.message; }
+    else{ msg.style.color="green"; msg.textContent = "✅ Registrierung erfolgreich (E-Mail evtl. bestätigen)"; }
+}
+
+// ---------- Login ----------
+async function login(){
+    const email = user.value.trim();
+    const password = pass.value.trim();
+
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+
+    if(error){ msg.style.color="red"; msg.textContent = "❌ Login fehlgeschlagen"; }
+    else{
+        sessionStorage.setItem("user", data.user.id);
+        loginDiv.style.display="none";
+        bereich.style.display="block";
+        msg.textContent="";
+        loadListDropdown();
+    }
+}
+
+// ---------- Logout ----------
+async function logout(){
+    await supabase.auth.signOut();
+    sessionStorage.clear();
+    location.reload();
+}
+
+// ---------- Liste erstellen ----------
+function createList(){
+    const user = sessionStorage.getItem("user");
+    const name = listName.value.trim();
+    if(!name) return alert("Listenname fehlt");
+
+    const stats = getAllStats();
+    if(!stats[user]) stats[user]={};
+    if(stats[user][name]) return alert("Liste existiert schon");
+
+    stats[user][name]=[];
+    saveAllStats(stats);
+    listName.value="";
+    loadListDropdown();
+    alert("✅ Liste erstellt");
+}
+
+// ---------- Dropdown ----------
+function loadListDropdown(){
+    const user = sessionStorage.getItem("user");
+    const stats = getAllStats();
+    listSelect.innerHTML="";
+
+    if(!stats[user]) return;
+
+    Object.keys(stats[user]).forEach(l=>{
+        const o=document.createElement("option");
+        o.value=l; o.textContent=l;
+        listSelect.appendChild(o);
+    });
+
+    loadNames();
+}
+
+// ---------- Namen laden ----------
+function loadNames(){
+    const user = sessionStorage.getItem("user");
+    const list = listSelect.value;
+    const stats = getAllStats();
+
+    if(!stats[user] || !stats[user][list]) return;
+
+    namenInput.value = stats[user][list].map(n=>n.name).join("\n");
+    updateStatsTable();
+}
+
+// ---------- Namen speichern ----------
+function saveNames(){
+    const user = sessionStorage.getItem("user");
+    const list = listSelect.value;
+    if(!list) return alert("Keine Liste gewählt");
+
+    const lines = namenInput.value.split("\n").map(n=>n.trim()).filter(n=>n);
+    const stats = getAllStats();
+    const old = stats[user][list]||[];
+
+    stats[user][list] = lines.map(name=>{
+        const e = old.find(x=>x.name===name);
+        return e ? e : {name,draws:0,lastDraw:"-"};
+    });
+
+    saveAllStats(stats);
+    alert("💾 Gespeichert");
+    updateStatsTable();
+}
+
+// ---------- Ziehen ----------
+function drawName(){
+    const user = sessionStorage.getItem("user");
+    const list = listSelect.value;
+    const stats = getAllStats();
+    const data = stats[user][list];
+
+    if(!data || data.length===0) return alert("Keine Namen");
+
+    const obj = data[Math.floor(Math.random()*data.length)];
+    obj.draws++;
+    obj.lastDraw = new Date().toLocaleString("de-DE");
+
+    saveAllStats(stats);
+
+    winner.textContent = "Gewinner: "+obj.name;
+    chance.textContent = "Chance: "+(100/data.length).toFixed(2)+"%";
+    updateStatsTable();
+}
+
+// ---------- Tabelle ----------
+function updateStatsTable(){
+    const user = sessionStorage.getItem("user");
+    const list = listSelect.value;
+    const stats = getAllStats();
+    userStats.innerHTML="";
+
+    if(!stats[user]||!stats[user][list]) return;
+
+    stats[user][list].forEach(n=>{
+        const tr=document.createElement("tr");
+        tr.innerHTML=`<td>${n.name}</td><td>${n.draws}</td><td>${n.lastDraw}</td>`;
+        userStats.appendChild(tr);
+    });
+}
+
+// ---------- Auto Login ----------
+window.onload = async ()=>{
+    const { data } = await supabase.auth.getSession();
+    if(data.session){
+        sessionStorage.setItem("user", data.session.user.id);
+        loginDiv.style.display="none";
+        bereich.style.display="block";
+        loadListDropdown();
+    }
+};
+</script>
+
+</body>
+</html>
